@@ -114,12 +114,30 @@ class OpenaiEngine():
     )
     def generate(self, messages, max_new_tokens=512, temperature=0, model=None, **kwargs):
         model = model if model else self.model
-        response = self.client.chat.completions.create(
-            model=model if model else self.model,
-            messages=messages,
-            max_tokens=max_new_tokens,
-            temperature=temperature,
-            **kwargs,
-        )
+        # HARBOR ADAPTER PATCH (the only change to upstream WebJudge code):
+        # reasoning models such as gpt-6-luna (the upstream-recommended judge) reject
+        # `max_tokens` and any non-default `temperature`. For them, send
+        # `max_completion_tokens` (512 is too small once reasoning tokens count) and
+        # leave temperature at the API default. Non-reasoning models are unchanged.
+        if _is_reasoning_model(model):
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_completion_tokens=int(os.getenv("JUDGE_MAX_COMPLETION_TOKENS", "16384")),
+                **kwargs,
+            )
+        else:
+            response = self.client.chat.completions.create(
+                model=model if model else self.model,
+                messages=messages,
+                max_tokens=max_new_tokens,
+                temperature=temperature,
+                **kwargs,
+            )
         return [choice.message.content for choice in response.choices]
+
+
+def _is_reasoning_model(model):
+    name = (model or "").lower()
+    return name.startswith(("o1", "o3", "o4", "gpt-5", "gpt-6"))
     
